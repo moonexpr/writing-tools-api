@@ -1,0 +1,5 @@
+# build artifacts
+wtsurface
+wtsurface-pure
+*.o
+wtkit-Swift.h
