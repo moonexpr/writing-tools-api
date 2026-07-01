@@ -104,6 +104,86 @@ static int Summarize(NSString *text) {
 
 // ---- ai: Apple Intelligence via the FoundationModels Swift shim ----
 #ifdef WT_HAVE_AI
+
+// Pack text into chunks <= budget chars, preferring paragraph then sentence
+// boundaries so structure is preserved; hard-splits only an over-long sentence.
+static NSArray<NSString *> *ChunkText(NSString *text, NSUInteger budget) {
+    NSMutableArray<NSString *> *chunks = [NSMutableArray array];
+    NSMutableString *cur = [NSMutableString string];
+    void (^flush)(void) = ^{
+        if (cur.length) { [chunks addObject:[cur copy]]; [cur setString:@""]; }
+    };
+    for (NSString *para in [text componentsSeparatedByString:@"\n"]) {
+        if (para.length <= budget) {
+            if (cur.length + para.length + 1 > budget) flush();
+            if (cur.length) [cur appendString:@"\n"];
+            [cur appendString:para];
+            continue;
+        }
+        flush();  // oversized paragraph: break into sentences
+        NSMutableString *sc = [NSMutableString string];
+        for (NSString *s in [para componentsSeparatedByString:@". "]) {
+            NSString *piece = [s stringByAppendingString:@". "];
+            if (piece.length > budget) {                 // pathological: hard split
+                if (sc.length) { [chunks addObject:[sc copy]]; [sc setString:@""]; }
+                for (NSUInteger i = 0; i < piece.length; i += budget) {
+                    NSUInteger len = MIN(budget, piece.length - i);
+                    [chunks addObject:[piece substringWithRange:NSMakeRange(i, len)]];
+                }
+                continue;
+            }
+            if (sc.length + piece.length > budget) {
+                [chunks addObject:[sc copy]]; [sc setString:@""];
+            }
+            [sc appendString:piece];
+        }
+        if (sc.length) [chunks addObject:[sc copy]];
+    }
+    flush();
+    return chunks;
+}
+
+// Map each chunk through the model on-device, then combine: reduce (re-run the
+// mode over joined outputs) for summarize/outline; concatenate for the rest.
+static int AIChunked(AIWriter *ai, NSString *mode, NSString *instruction,
+                     NSString *text, NSUInteger budget) {
+    NSArray<NSString *> *chunks = ChunkText(text, budget);
+    fprintf(stderr, "ai: large input — processing on-device in %lu chunks\n",
+            (unsigned long)chunks.count);
+
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    NSUInteger i = 0;
+    for (NSString *c in chunks) {
+        fprintf(stderr, "ai: chunk %lu/%lu\n", (unsigned long)++i,
+                (unsigned long)chunks.count);
+        NSString *r = [ai runWithInstruction:instruction text:c usePCC:NO];
+        if ([r isEqualToString:@"ERROR_CONTEXT"] || [r hasPrefix:@"ERROR:"]) {
+            fprintf(stderr, "ai: chunk %lu failed: %s\n", (unsigned long)i, r.UTF8String);
+            return 1;
+        }
+        [parts addObject:r];
+    }
+
+    BOOL reduce = [mode isEqualToString:@"summarize"] || [mode isEqualToString:@"outline"];
+    NSString *combined;
+    if (reduce) {
+        NSString *joined = [parts componentsJoinedByString:@"\n"];
+        while (joined.length > budget) {                 // multi-level reduce
+            NSMutableArray<NSString *> *red = [NSMutableArray array];
+            for (NSString *s in ChunkText(joined, budget)) {
+                NSString *r = [ai runWithInstruction:instruction text:s usePCC:NO];
+                [red addObject:([r hasPrefix:@"ERROR"] ? @"" : r)];
+            }
+            joined = [red componentsJoinedByString:@"\n"];
+        }
+        combined = [ai runWithInstruction:instruction text:joined usePCC:NO];
+    } else {
+        combined = [parts componentsJoinedByString:@"\n\n"];
+    }
+    printf("%s\n", combined.UTF8String);
+    return 0;
+}
+
 static int AI(NSString *mode, BOOL usePCC, NSString *text) {
     if (text.length == 0) { fprintf(stderr, "ai: empty input\n"); return 1; }
     if (!usePCC && ![AIWriter isAvailable]) {
@@ -144,7 +224,17 @@ static int AI(NSString *mode, BOOL usePCC, NSString *text) {
                            "asterisks, backticks, headings, or bullet characters.";
     NSString *instruction =
         [(prompts[mode] ?: prompts[@"proofread"]) stringByAppendingString:plaintext];
-    NSString *out = [[AIWriter new] runWithInstruction:instruction text:text usePCC:usePCC];
+
+    AIWriter *ai = [AIWriter new];
+    // Auto-chunk large input on-device so >4K-token docs work without PCC. Output
+    // ≈ input for proofread/simplify/rewrite, so those get a tighter per-chunk budget.
+    BOOL smallOutput = [mode isEqualToString:@"summarize"] || [mode isEqualToString:@"outline"];
+    NSUInteger budget = smallOutput ? 9000 : 5000;   // chars (~2250 / ~1250 tokens)
+    if (!usePCC && text.length > budget) {
+        return AIChunked(ai, mode, instruction, text, budget);
+    }
+
+    NSString *out = [ai runWithInstruction:instruction text:text usePCC:usePCC];
 
     if ([out isEqualToString:@"ERROR_CONTEXT"]) {
         if (usePCC) {

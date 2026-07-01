@@ -81,5 +81,16 @@ checks its own entitlement first (`SecTaskCopyValueForEntitlement`) and, if abse
 prints guidance and exits `3` instead of crashing. To actually use PCC, build this as
 a signed `.app` with that entitlement.
 
-When on-device input exceeds 4,096 tokens the model returns `contextSizeExceeded`;
-the tool catches it and suggests `--pcc` (exit `2`).
+### On-device chunking for large input (no PCC needed)
+
+Rather than requiring PCC for long documents, the on-device path **auto-chunks**:
+input over a safe per-mode budget is split on paragraph/sentence boundaries,
+each chunk is processed on-device, then the results are combined —
+
+- **proofread / simplify / rewrite** → chunks concatenated in order (structure preserved);
+- **summarize / outline** → a *reduce* pass re-runs the mode over the joined outputs
+  (recursively) so the result stays a single coherent summary/outline.
+
+Chunk progress prints to stderr; the result to stdout. This keeps everything
+on-device with no entitlement and no quota. `--pcc` remains available if you'd
+rather use the 32K window in one shot (and have the entitlement).
