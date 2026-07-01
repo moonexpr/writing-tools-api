@@ -103,6 +103,17 @@ static int AI(NSString *mode, NSString *text) {
                        "Return only the rewritten text, with no commentary.",
         @"summarize": @"Summarize the user's text in one or two concise sentences. "
                        "Return only the summary, with no commentary.",
+        @"simplify":  @"Rewrite the user's text in simpler, plainer language while "
+                       "preserving its original narrative structure, the order of "
+                       "ideas, and all of its points. Keep the same flow and roughly "
+                       "the same length — do NOT condense it into a summary. Use "
+                       "shorter sentences and everyday words. Return only the "
+                       "rewritten text, with no commentary.",
+        @"outline":   @"Turn the user's text into a plain-text outline that follows "
+                       "its narrative structure in order. Use simple numbered lines "
+                       "(1., 2., 3.) for top-level points and space indentation for "
+                       "sub-points. Keep each line short and in plain language. "
+                       "Return only the outline, with no commentary.",
     };
     // Force plaintext: the on-device model otherwise tends to wrap output in Markdown.
     NSString *plaintext = @" Output plain text only. Do not use Markdown, code fences, "

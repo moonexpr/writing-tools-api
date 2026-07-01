@@ -32,9 +32,14 @@ echo "teh quick brown fox jumpd over teh lazi dog" | ./wtsurface proofread   # N
 pbpaste | ./wtsurface summarize                                              # Summary service
 
 echo "the fox jump over a apple" | ./wtsurface ai proofread   # Apple Intelligence
-pbpaste | ./wtsurface ai summarize
-pbpaste | ./wtsurface ai rewrite
+pbpaste | ./wtsurface ai summarize    # compress to 1-2 sentences
+pbpaste | ./wtsurface ai simplify     # preserve structure + length, plainer language
+pbpaste | ./wtsurface ai outline      # narrative skeleton as plain numbered lines
+pbpaste | ./wtsurface ai rewrite      # clearer + more professional
 ```
+
+The `ai` modes sit on a synthesis gradient: `summarize` compresses hardest, `simplify`
+keeps the full structure and length but plainer, `outline` extracts the ordered beats.
 
 ## The AI-grade path (Apple Intelligence)
 
