@@ -59,3 +59,27 @@ Example — grammar the classic checker misses:
 $ echo "the quick brown fox jump over the lazy dogs and it was a apple day" | ./wtsurface ai proofread
 The quick brown fox jumps over the lazy dogs, and it was an apple day.
 ```
+
+## Model selection & context window
+
+| Model | Context | Locality | Reachable from an unsigned CLI? |
+|---|---|---|---|
+| `SystemLanguageModel.default` (on-device 3B) | **4,096** tokens | on-device | ✅ default |
+| `PrivateCloudComputeLanguageModel` | **32,768** tokens | Apple PCC (off-device) | ❌ needs a managed entitlement |
+
+`--pcc` selects the larger cloud model:
+
+```sh
+echo "$long_text" | ./wtsurface ai --pcc summarize
+```
+
+…but it requires the **`com.apple.developer.private-cloud-compute`** entitlement,
+which Apple grants to a developer account and embeds via a provisioning profile.
+An ad-hoc/unsigned binary cannot use it — touching PCC without the entitlement is a
+`fatalError`, and self-signing it gets the process **SIGKILL'd by AMFI**. So the tool
+checks its own entitlement first (`SecTaskCopyValueForEntitlement`) and, if absent,
+prints guidance and exits `3` instead of crashing. To actually use PCC, build this as
+a signed `.app` with that entitlement.
+
+When on-device input exceeds 4,096 tokens the model returns `contextSizeExceeded`;
+the tool catches it and suggests `--pcc` (exit `2`).

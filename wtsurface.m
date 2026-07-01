@@ -20,6 +20,21 @@
 // Without it, the tool still builds as pure Obj-C (proofread + summarize only).
 #ifdef WT_HAVE_AI
 #import "wtkit-Swift.h"
+#import <Security/Security.h>
+
+// PCC uses a restricted managed entitlement. Touching PrivateCloudComputeLanguageModel
+// without it is a fatalError (unsigned) or an AMFI SIGKILL (ad-hoc). Check ourselves
+// first so --pcc degrades to a message instead of crashing the process.
+static BOOL HasPCCEntitlement(void) {
+    SecTaskRef task = SecTaskCreateFromSelf(NULL);
+    if (!task) return NO;
+    CFTypeRef v = SecTaskCopyValueForEntitlement(
+        task, CFSTR("com.apple.developer.private-cloud-compute"), NULL);
+    BOOL ok = (v == kCFBooleanTrue);
+    if (v) CFRelease(v);
+    CFRelease(task);
+    return ok;
+}
 #endif
 
 static NSString *ReadStdin(void) {
@@ -89,11 +104,20 @@ static int Summarize(NSString *text) {
 
 // ---- ai: Apple Intelligence via the FoundationModels Swift shim ----
 #ifdef WT_HAVE_AI
-static int AI(NSString *mode, NSString *text) {
+static int AI(NSString *mode, BOOL usePCC, NSString *text) {
     if (text.length == 0) { fprintf(stderr, "ai: empty input\n"); return 1; }
-    if (![AIWriter isAvailable]) {
+    if (!usePCC && ![AIWriter isAvailable]) {
         fprintf(stderr, "ai: on-device model unavailable\n");
         return 1;
+    }
+    if (usePCC && !HasPCCEntitlement()) {
+        fprintf(stderr,
+            "ai: --pcc needs the 'com.apple.developer.private-cloud-compute' "
+            "entitlement,\n    which Apple must grant to your developer account and "
+            "embed via a\n    provisioning profile. An unsigned CLI can't use it "
+            "(AMFI kills it).\n    Build/sign this as an entitled .app, or stay "
+            "on-device (4096-token cap).\n");
+        return 3;
     }
     NSDictionary<NSString *, NSString *> *prompts = @{
         @"proofread": @"You are a proofreader. Correct the spelling, grammar, and "
@@ -120,7 +144,19 @@ static int AI(NSString *mode, NSString *text) {
                            "asterisks, backticks, headings, or bullet characters.";
     NSString *instruction =
         [(prompts[mode] ?: prompts[@"proofread"]) stringByAppendingString:plaintext];
-    NSString *out = [[AIWriter new] runWithInstruction:instruction text:text];
+    NSString *out = [[AIWriter new] runWithInstruction:instruction text:text usePCC:usePCC];
+
+    if ([out isEqualToString:@"ERROR_CONTEXT"]) {
+        if (usePCC) {
+            fprintf(stderr, "ai: input exceeds the Private Cloud Compute limit "
+                            "(32768 tokens).\n");
+        } else {
+            fprintf(stderr, "ai: input exceeds the on-device limit (4096 tokens). "
+                            "Retry with the larger cloud model:\n"
+                            "    wtsurface ai --pcc %s\n", mode.UTF8String);
+        }
+        return 2;
+    }
     printf("%s\n", out.UTF8String);
     return [out hasPrefix:@"ERROR:"] ? 1 : 0;
 }
@@ -133,8 +169,15 @@ int main(int argc, const char *argv[]) {
         if ([cmd isEqualToString:@"summarize"]) return Summarize(text);
 #ifdef WT_HAVE_AI
         if ([cmd isEqualToString:@"ai"]) {
-            NSString *mode = argc > 2 ? @(argv[2]) : @"proofread";
-            return AI(mode, text);
+            // Parse: ai [--pcc] [mode]   (flag order-independent; mode = first non-flag)
+            BOOL usePCC = NO;
+            NSString *mode = @"proofread";
+            for (int i = 2; i < argc; i++) {
+                NSString *a = @(argv[i]);
+                if ([a isEqualToString:@"--pcc"]) usePCC = YES;
+                else mode = a;
+            }
+            return AI(mode, usePCC, text);
         }
 #endif
         return Proofread(text);

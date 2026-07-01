@@ -9,14 +9,17 @@
 #   /Users/jc/GitRepos/writing-tools-api/scripts/wt rewrite
 
 BIN="${0:A:h:h}/wtsurface"          # repo-root/wtsurface, resolved from this script
-MODE="${1:-proofread}"
+ARGS=("$@")                          # e.g. "proofread" or "--pcc summarize"
+[[ ${#ARGS[@]} -eq 0 ]] && ARGS=(proofread)
 TEXT="$(cat)"
 
-run() { print -r -- "$TEXT" | "$BIN" ai "$MODE" 2>/dev/null; }
+run() { print -r -- "$TEXT" | "$BIN" ai "${ARGS[@]}" 2>/dev/null; }
 
-out="$(run)"
-if [[ $? -ne 0 || "$out" == ERROR:* ]]; then
+out="$(run)"; code=$?
+# Retry once only for the transient first-run warm-up (exit 1); not for context
+# overflow (exit 2), which a retry can't fix.
+if [[ $code -eq 1 || "$out" == ERROR:* ]]; then
     sleep 1
-    out="$(run)"                    # one retry after warm-up
+    out="$(run)"
 fi
 print -r -- "$out"

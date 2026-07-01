@@ -29,7 +29,7 @@ wtsurface.o: wtsurface.m wtkit-Swift.h
 # 3) Link with swiftc so the Swift runtime + FoundationModels resolve.
 wtsurface: AIShim.o wtsurface.o
 	swiftc $^ -o $@ -sdk "$(SDK)" -target "$(TARGET)" \
-	    $(FRAMEWORKS) -framework FoundationModels
+	    $(FRAMEWORKS) -framework FoundationModels -framework Security
 
 # Pure Obj-C build — no Apple Intelligence, no Swift toolchain needed.
 pure: wtsurface.m
