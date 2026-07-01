@@ -104,7 +104,11 @@ static int AI(NSString *mode, NSString *text) {
         @"summarize": @"Summarize the user's text in one or two concise sentences. "
                        "Return only the summary, with no commentary.",
     };
-    NSString *instruction = prompts[mode] ?: prompts[@"proofread"];
+    // Force plaintext: the on-device model otherwise tends to wrap output in Markdown.
+    NSString *plaintext = @" Output plain text only. Do not use Markdown, code fences, "
+                           "asterisks, backticks, headings, or bullet characters.";
+    NSString *instruction =
+        [(prompts[mode] ?: prompts[@"proofread"]) stringByAppendingString:plaintext];
     NSString *out = [[AIWriter new] runWithInstruction:instruction text:text];
     printf("%s\n", out.UTF8String);
     return [out hasPrefix:@"ERROR:"] ? 1 : 0;
