@@ -1,0 +1,22 @@
+#!/bin/zsh
+# wt — Shortcuts-friendly wrapper for wtsurface.
+# Reads text on stdin, runs an ai mode, and retries once if the on-device
+# model throws the transient first-run "ModelManagerError 1013".
+#
+# Usage (in a Shortcuts "Run Shell Script", pass input to stdin):
+#   /Users/jc/GitRepos/writing-tools-api/scripts/wt proofread
+#   /Users/jc/GitRepos/writing-tools-api/scripts/wt summarize
+#   /Users/jc/GitRepos/writing-tools-api/scripts/wt rewrite
+
+BIN="${0:A:h:h}/wtsurface"          # repo-root/wtsurface, resolved from this script
+MODE="${1:-proofread}"
+TEXT="$(cat)"
+
+run() { print -r -- "$TEXT" | "$BIN" ai "$MODE" 2>/dev/null; }
+
+out="$(run)"
+if [[ $? -ne 0 || "$out" == ERROR:* ]]; then
+    sleep 1
+    out="$(run)"                    # one retry after warm-up
+fi
+print -r -- "$out"
